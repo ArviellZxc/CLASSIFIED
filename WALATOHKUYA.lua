@@ -2,7 +2,6 @@
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
-local Debris = game:GetService("Debris")
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
@@ -10,18 +9,17 @@ local Mouse = LocalPlayer:GetMouse()
 --// SETTINGS
 local AimbotEnabled = false
 local RightClickHeld = false
-local AimbotMode = "Instant" -- "Instant" or "Smooth"
-local Smoothness = 0
+local AimbotMode = "Smooth" -- "Instant" or "Smooth"
+local Smoothness = 0.15 -- Use 0.1 - 0.2 for human-like smoothness
 local MaxDistance = 1000
-local FOVRadius = 120 -- slightly bigger
+local FOVRadius = 120
 
 local CurrentTarget = nil
 local FakeHeads = {}
 
---// VISIBILITY CHECK INCLUDING FAKE HEADS
+--// VISIBILITY CHECK
 local function isVisible(part)
 	if not part or not part:IsA("BasePart") then return false end
-
 	local origin = Camera.CFrame.Position
 	local direction = (part.Position - origin)
 	local rayParams = RaycastParams.new()
@@ -30,15 +28,10 @@ local function isVisible(part)
 	rayParams.IgnoreWater = true
 
 	local result = workspace:Raycast(origin, direction.Unit * direction.Magnitude, rayParams)
-	if not result then return false end
-	if result.Instance == part or result.Instance:IsDescendantOf(part.Parent) then
-		return true
-	end
-
-	return false
+	return result and (result.Instance == part or result.Instance:IsDescendantOf(part.Parent))
 end
 
---// GET HEAD OR CREATE/REUSE FAKE HEAD EACH FRAME
+--// HEAD OR FAKE HEAD
 local function getHeadTarget(character)
 	local head = character:FindFirstChild("Head")
 	if head then return head end
@@ -46,7 +39,6 @@ local function getHeadTarget(character)
 	local root = character:FindFirstChild("HumanoidRootPart")
 	if not root then return nil end
 
-	-- Create or reuse fake head
 	local fakeHead = FakeHeads[character]
 	if not fakeHead or not fakeHead:IsDescendantOf(character) then
 		fakeHead = Instance.new("Part")
@@ -59,11 +51,11 @@ local function getHeadTarget(character)
 		FakeHeads[character] = fakeHead
 	end
 
-	fakeHead.CFrame = root.CFrame * CFrame.new(0, 1.70, 0)
+	fakeHead.CFrame = root.CFrame * CFrame.new(0, 1.7, 0)
 	return fakeHead
 end
 
---// GET VALID TARGET
+--// GET TARGET
 local function getValidTarget()
 	local originChar = LocalPlayer.Character
 	if not originChar or not originChar:FindFirstChild("HumanoidRootPart") then return nil end
@@ -71,7 +63,6 @@ local function getValidTarget()
 
 	local closest, minDist = nil, MaxDistance
 	local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-	local radius = FOVRadius
 
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= LocalPlayer and player.Character then
@@ -81,12 +72,11 @@ local function getValidTarget()
 				if head and isVisible(head) then
 					local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
 					if onScreen then
-						local head2D = Vector2.new(screenPos.X, screenPos.Y)
-						local distanceFromCenter = (head2D - screenCenter).Magnitude
-						local worldDistance = (head.Position - origin).Magnitude
-						if distanceFromCenter <= radius and worldDistance < minDist then
+						local dist2D = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+						local dist3D = (head.Position - origin).Magnitude
+						if dist2D <= FOVRadius and dist3D < minDist then
 							closest = head
-							minDist = worldDistance
+							minDist = dist3D
 						end
 					end
 				end
@@ -109,9 +99,11 @@ RunService.RenderStepped:Connect(function()
 
 	if AimbotEnabled and CurrentTarget and CurrentTarget.Parent then
 		local desired = CFrame.new(Camera.CFrame.Position, CurrentTarget.Position)
-		Camera.CFrame = (AimbotMode == "Instant" or Smoothness <= 0)
-			and desired
-			or Camera.CFrame:Lerp(desired, math.clamp(Smoothness, 0, 1))
+		if AimbotMode == "Smooth" and Smoothness > 0 then
+			Camera.CFrame = Camera.CFrame:Lerp(desired, Smoothness)
+		else
+			Camera.CFrame = desired
+		end
 	end
 end)
 
@@ -151,7 +143,7 @@ end
 Players.PlayerAdded:Connect(createESP)
 Players.PlayerRemoving:Connect(function(player)
 	removeESP(player)
-	FakeHeads[player.Character] = nil -- Clean up fake head reference
+	FakeHeads[player.Character] = nil
 end)
 
 for _, player in ipairs(Players:GetPlayers()) do
